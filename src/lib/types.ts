@@ -43,6 +43,8 @@ export interface VoiceTurnResponse {
   assistantReply: string;
   audioBase64: string | null;
   audioMimeType: string;
+  /** Voice TTS yang benar-benar dipakai (hasil dari scenarios.voice_id atau fallback "onyx"). */
+  voice: string;
 }
 
 export interface EvaluateSessionResponse {

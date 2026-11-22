@@ -50,6 +50,13 @@ interface Props {
   onExit: () => void;
 }
 
+/** Mengosongkan elemen audio sepenuhnya agar sumber lama tidak ikut terbawa (penting di iOS). */
+function resetAudioElement(audio: HTMLAudioElement) {
+  audio.pause();
+  audio.removeAttribute("src");
+  audio.load();
+}
+
 let messageSeq = 0;
 const nextId = () => `m-${Date.now()}-${messageSeq++}`;
 
@@ -74,6 +81,10 @@ export default function SessionScreen({ session, scenario, onEvaluated, onExit }
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUnlockedRef = useRef(false);
   const lastAudioUrlRef = useRef<string | null>(null);
+  /** URL klip balasan yang sedang aktif; event dari klip lain (lama / audio unlock) diabaikan. */
+  const activeClipUrlRef = useRef<string | null>(null);
+  /** Naik setiap kali pemutaran dimulai/dihentikan, untuk membatalkan promise play() yang basi. */
+  const playTokenRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(true);
@@ -91,11 +102,14 @@ export default function SessionScreen({ session, scenario, onEvaluated, onExit }
       const audio = new Audio();
       audio.preload = "auto";
       audio.setAttribute("playsinline", "true");
+      const isActiveClip = () => !!activeClipUrlRef.current && audio.src === activeClipUrlRef.current;
       audio.addEventListener("ended", () => {
-        if (phaseRef.current === "playing") setPhase("idle");
+        if (isActiveClip() && phaseRef.current === "playing") setPhase("idle");
       });
       audio.addEventListener("error", () => {
+        if (!isActiveClip() || !mountedRef.current) return;
         if (phaseRef.current === "playing") setPhase("idle");
+        setHint("Audio balasan gagal dimuat. Ketuk “Putar Ulang” atau baca transkrip.");
       });
       audioRef.current = audio;
     }
@@ -103,6 +117,7 @@ export default function SessionScreen({ session, scenario, onEvaluated, onExit }
   }, [setPhase]);
 
   const stopPlayback = useCallback(() => {
+    playTokenRef.current++;
     const audio = audioRef.current;
     if (audio && !audio.paused) audio.pause();
     if (phaseRef.current === "playing") setPhase("idle");
@@ -113,25 +128,44 @@ export default function SessionScreen({ session, scenario, onEvaluated, onExit }
     if (audioUnlockedRef.current) return;
     const audio = getAudio();
     audioUnlockedRef.current = true;
+    activeClipUrlRef.current = null; // klip hening bukan balasan AI
     audio.src = silentWavDataUri();
-    audio.play().catch(() => {
-      audioUnlockedRef.current = false;
+    audio.play().catch((err: unknown) => {
+      // Hanya penolakan izin yang berarti elemen belum terbuka; AbortError terjadi
+      // ketika klip hening digantikan balasan AI, dan itu normal.
+      if (err instanceof DOMException && err.name === "NotAllowedError") audioUnlockedRef.current = false;
     });
   }, [getAudio]);
 
+  /**
+   * Memuat & memutar klip balasan dengan bersih: reset elemen, pasang sumber baru, load(), play().
+   * Bagian sinkron (sebelum await) sudah memasang sumber baru, jadi pemanggil boleh me-revoke URL lama
+   * tepat setelah memanggil fungsi ini.
+   */
   const playUrl = useCallback(
     async (url: string) => {
       const audio = getAudio();
-      audio.pause();
+      const token = ++playTokenRef.current;
+
+      resetAudioElement(audio);
+      activeClipUrlRef.current = url;
       audio.src = url;
-      audio.currentTime = 0;
+      audio.load();
       setPhase("playing");
+
       try {
         await audio.play();
-      } catch {
-        if (!mountedRef.current) return;
+      } catch (err) {
+        // Diabaikan bila sudah digantikan klip lain / dihentikan / komponen sudah unmount.
+        if (!mountedRef.current || token !== playTokenRef.current) return;
+        const name = err instanceof DOMException ? err.name : "";
+        if (name === "AbortError") return;
         setPhase("idle");
-        setHint("Browser memblokir pemutaran otomatis. Ketuk “Putar Ulang” untuk mendengar balasan.");
+        setHint(
+          name === "NotAllowedError"
+            ? "Browser memblokir pemutaran otomatis. Ketuk “Putar Ulang” untuk mendengar balasan."
+            : "Audio balasan gagal diputar. Ketuk “Putar Ulang” atau baca transkrip."
+        );
       }
     },
     [getAudio, setPhase]
@@ -163,11 +197,15 @@ export default function SessionScreen({ session, scenario, onEvaluated, onExit }
         ]);
 
         if (data.audioBase64) {
-          if (lastAudioUrlRef.current) URL.revokeObjectURL(lastAudioUrlRef.current);
+          // Blob URL baru untuk setiap giliran; URL lama baru di-revoke setelah elemen audio
+          // sudah dialihkan ke sumber baru (playUrl memasang src secara sinkron).
+          const previousUrl = lastAudioUrlRef.current;
           const url = base64ToObjectUrl(data.audioBase64, data.audioMimeType || "audio/mpeg");
           lastAudioUrlRef.current = url;
           setHasReplay(true);
-          await playUrl(url);
+          const playing = playUrl(url);
+          if (previousUrl && previousUrl !== url) URL.revokeObjectURL(previousUrl);
+          await playing;
         } else {
           setPhase("idle");
           setHint("Suara balasan tidak tersedia, silakan baca transkrip.");
@@ -369,12 +407,12 @@ export default function SessionScreen({ session, scenario, onEvaluated, onExit }
       if (rec && rec.state !== "inactive") rec.stop();
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
-      const audio = audioRef.current;
-      if (audio) {
-        audio.pause();
-        audio.removeAttribute("src");
-      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- penghitung biasa, bukan ref ke node DOM
+      playTokenRef.current++;
+      activeClipUrlRef.current = null;
+      if (audioRef.current) resetAudioElement(audioRef.current);
       if (lastAudioUrlRef.current) URL.revokeObjectURL(lastAudioUrlRef.current);
+      lastAudioUrlRef.current = null;
     };
   }, []);
 

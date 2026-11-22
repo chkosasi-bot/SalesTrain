@@ -212,12 +212,19 @@ export async function POST(request: Request) {
       cleanReply(completion.choices[0]?.message?.content ?? "") ||
       "Maaf, saya kurang menangkap maksud Anda. Bisa diulang?";
 
+    // Voice diambil dari scenarios.voice_id; hanya jatuh ke "onyx" bila kosong / tidak valid.
+    const rawVoiceId = context.scenario.voice_id;
+    const voice = resolveTtsVoice(rawVoiceId);
+    if (typeof rawVoiceId === "string" && rawVoiceId.trim() && rawVoiceId.trim().toLowerCase() !== voice) {
+      console.warn(`[voice-turn] voice_id "${rawVoiceId}" tidak valid untuk ${TTS_MODEL}, memakai "${voice}".`);
+    }
+
     // 3) TTS & simpan balasan AI secara paralel.
     const [speechResult, assistantInsert] = await Promise.all([
       openai.audio.speech
         .create({
           model: TTS_MODEL,
-          voice: resolveTtsVoice(context.scenario.voice_id),
+          voice,
           input: assistantReply,
           response_format: "mp3",
         })
@@ -236,13 +243,14 @@ export async function POST(request: Request) {
 
     if (assistantInsert.error) throw assistantInsert.error;
 
-    console.info(`[voice-turn] sesi ${sessionId} giliran ${userTurn} (voice: ${resolveTtsVoice(context.scenario.voice_id)}) selesai dalam ${Date.now() - startedAt}ms`);
+    console.info(`[voice-turn] sesi ${sessionId} giliran ${userTurn} (voice: ${voice}) selesai dalam ${Date.now() - startedAt}ms`);
 
     const body: VoiceTurnResponse = {
       userTranscript,
       assistantReply,
       audioBase64: speechResult,
       audioMimeType: "audio/mpeg",
+      voice,
     };
     return jsonOk(body);
   } catch (err) {
