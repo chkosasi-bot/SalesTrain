@@ -66,8 +66,10 @@ scripts/set-telegram-webhook.mjs     Daftarkan webhook bot ke domain produksi
 - Pengecekan login di `/api/voice-turn` berjalan **paralel** dengan STT (tanpa tambahan latensi); STT dibatalkan bila login tidak valid.
 - Proxy hanya berjalan di `/` dan `/login` — tidak di `/api/*`, aset statis, `sw.js` atau manifest.
 - Supabase Dashboard → Authentication → URL Configuration: tambahkan `https://<domain>/auth/callback` dan `http://localhost:3000/auth/callback` ke **Redirect URLs**.
-- Tautan email (PKCE) harus dibuka di browser yang sama dengan tempat meminta. Agar bisa dibuka di browser mana saja, ubah template email Magic Link menjadi
-  `{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=magiclink` (callback mendukung keduanya).
+- Tautan email (PKCE) harus dibuka di browser yang sama dengan tempat meminta. Agar bisa dibuka di browser mana saja, ubah template email
+  **Magic Link** dan **Confirm signup** (dipakai untuk user baru) menjadi
+  `{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=email` (callback mendukung keduanya).
+- Butuh trigger `auth.users → profiles` yang sehat: lihat `supabase/migrations/20261122_fix_auth_user_trigger.sql`.
 
 ## Alur `/api/voice-turn`
 
