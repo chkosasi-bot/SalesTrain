@@ -8,7 +8,7 @@ import {
   STT_MODEL_PRIMARY,
   TTS_MODEL,
   getOpenAI,
-  getTtsVoice,
+  resolveTtsVoice,
 } from "@/lib/openai-server";
 import { errorMessage, isValidId, jsonError, jsonOk } from "@/lib/api-utils";
 import type { VoiceTurnResponse } from "@/lib/types";
@@ -22,6 +22,13 @@ class HttpError extends Error {
   constructor(public status: number, message: string) {
     super(message);
   }
+}
+
+interface ScenarioContext {
+  system_prompt: string | null;
+  customer_name: string | null;
+  title: string | null;
+  voice_id: string | null;
 }
 
 interface DbMessage {
@@ -82,7 +89,7 @@ async function loadContext(sessionId: string) {
   const [scenarioRes, historyRes] = await Promise.all([
     supabase
       .from("scenarios")
-      .select("system_prompt, customer_name, title")
+      .select("system_prompt, customer_name, title, voice_id")
       .eq("id", session.scenario_id)
       .maybeSingle(),
     supabase
@@ -101,13 +108,13 @@ async function loadContext(sessionId: string) {
   const lastTurn = recentDesc.length ? Number(recentDesc[0].turn_order) || 0 : 0;
 
   return {
-    scenario: scenarioRes.data as { system_prompt: string | null; customer_name: string | null; title: string | null },
+    scenario: scenarioRes.data as ScenarioContext,
     history: [...recentDesc].reverse(),
     lastTurn,
   };
 }
 
-function buildSystemPrompt(scenario: { system_prompt: string | null; customer_name: string | null; title: string | null }) {
+function buildSystemPrompt(scenario: ScenarioContext) {
   const persona = scenario.customer_name ? `Nama karaktermu: ${scenario.customer_name}.` : "";
   return [
     scenario.system_prompt?.trim() || "Kamu adalah calon pelanggan yang sedang didatangi seorang salesman.",
@@ -210,7 +217,7 @@ export async function POST(request: Request) {
       openai.audio.speech
         .create({
           model: TTS_MODEL,
-          voice: getTtsVoice(),
+          voice: resolveTtsVoice(context.scenario.voice_id),
           input: assistantReply,
           response_format: "mp3",
         })
@@ -229,7 +236,7 @@ export async function POST(request: Request) {
 
     if (assistantInsert.error) throw assistantInsert.error;
 
-    console.info(`[voice-turn] sesi ${sessionId} giliran ${userTurn} selesai dalam ${Date.now() - startedAt}ms`);
+    console.info(`[voice-turn] sesi ${sessionId} giliran ${userTurn} (voice: ${resolveTtsVoice(context.scenario.voice_id)}) selesai dalam ${Date.now() - startedAt}ms`);
 
     const body: VoiceTurnResponse = {
       userTranscript,

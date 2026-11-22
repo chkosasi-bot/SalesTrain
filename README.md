@@ -20,7 +20,6 @@ Variabel lingkungan (`.env.local`):
 | `OPENAI_API_KEY` | Kunci OpenAI (server saja) |
 | `NEXT_PUBLIC_SUPABASE_URL` | URL proyek Supabase |
 | `SUPABASE_SERVICE_ROLE_KEY` | Service role key — hanya dipakai di API routes, tidak pernah dikirim ke browser |
-| `OPENAI_TTS_VOICE` | Opsional: `onyx` (default) atau `alloy` |
 
 > Mikrofon hanya bisa diakses lewat **HTTPS** atau `localhost`. Untuk uji di HP, deploy (mis. Vercel) atau gunakan tunnel HTTPS.
 
@@ -52,5 +51,6 @@ src/app/api/evaluate-session POST — nilai transkrip, simpan skor, status: comp
 
 - Nilai `status` sesi yang dipakai: `in_progress` dan `completed`.
 - `feedback_summary` disimpan sebagai teks: ringkasan + daftar kelebihan + saran perbaikan.
+- Suara pelanggan AI diambil dari kolom `scenarios.voice_id` (voice `tts-1`: alloy, ash, coral, echo, fable, nova, onyx, sage, shimmer). Kosong atau tidak valid → `onyx`.
 - Desktop: tahan tombol **Spasi** untuk berbicara.
 - Ikon dapat dibuat ulang dengan `node scripts/generate-icons.mjs`.

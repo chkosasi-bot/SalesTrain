@@ -21,12 +21,30 @@ export const STT_MODEL_FALLBACK = "whisper-1";
 export const CHAT_MODEL = "gpt-4o-mini";
 export const TTS_MODEL = "tts-1";
 
-const ALLOWED_VOICES = ["onyx", "alloy"] as const;
-type AllowedVoice = (typeof ALLOWED_VOICES)[number];
+/** Voice yang didukung model `tts-1`. */
+export const TTS_VOICES = [
+  "alloy",
+  "ash",
+  "coral",
+  "echo",
+  "fable",
+  "nova",
+  "onyx",
+  "sage",
+  "shimmer",
+] as const;
+export type TtsVoice = (typeof TTS_VOICES)[number];
 
-export function getTtsVoice(): AllowedVoice {
-  const v = process.env.OPENAI_TTS_VOICE?.toLowerCase();
-  return (ALLOWED_VOICES as readonly string[]).includes(v ?? "") ? (v as AllowedVoice) : "onyx";
+export const DEFAULT_TTS_VOICE: TtsVoice = "onyx";
+
+/**
+ * Mengubah `scenarios.voice_id` menjadi voice TTS yang valid.
+ * Kosong / null / tidak dikenal → fallback ke "onyx".
+ */
+export function resolveTtsVoice(voiceId: unknown): TtsVoice {
+  if (typeof voiceId !== "string") return DEFAULT_TTS_VOICE;
+  const v = voiceId.trim().toLowerCase();
+  return (TTS_VOICES as readonly string[]).includes(v) ? (v as TtsVoice) : DEFAULT_TTS_VOICE;
 }
 
 /** Jumlah maksimum pesan riwayat yang dikirim ke LLM (termasuk ucapan terbaru). */
