@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "@/lib/supabase-server";
+import { getAuthUser } from "@/lib/supabase/server-auth";
 import { CHAT_MODEL, getOpenAI } from "@/lib/openai-server";
 import { errorMessage, isValidId, jsonError, jsonOk } from "@/lib/api-utils";
 import type { EvaluateSessionResponse, Evaluation } from "@/lib/types";
@@ -80,13 +81,19 @@ export async function POST(request: Request) {
   try {
     const supabase = getSupabaseAdmin();
 
-    const { data: session, error: sessionError } = await supabase
-      .from("sessions")
-      .select("id, scenario_id, salesman_name")
-      .eq("id", String(sessionId))
-      .maybeSingle();
+    const [user, sessionRes] = await Promise.all([
+      getAuthUser(),
+      supabase
+        .from("sessions")
+        .select("id, scenario_id, salesman_name, user_id")
+        .eq("id", String(sessionId))
+        .maybeSingle(),
+    ]);
+    if (!user) return jsonError("Sesi login berakhir. Silakan masuk kembali.", 401);
+    const { data: session, error: sessionError } = sessionRes;
     if (sessionError) throw sessionError;
     if (!session) return jsonError("Sesi tidak ditemukan.", 404);
+    if (session.user_id !== user.id) return jsonError("Sesi latihan ini bukan milik akun Anda.", 403);
 
     const [scenarioRes, messagesRes] = await Promise.all([
       supabase

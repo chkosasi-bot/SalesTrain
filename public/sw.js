@@ -3,13 +3,14 @@
  * - Cache-first untuk aset statis (/_next/static, /icons, font, gambar)
  * - Network-first untuk navigasi halaman (fallback ke cache / halaman offline)
  * - Tidak pernah meng-cache /api/* (data sesi & audio selalu dari jaringan)
+ * - Tidak pernah meng-cache /login, /auth/* dan /api/auth/* (alur login & cookie sesi)
  */
-const VERSION = "v1";
+const VERSION = "v2";
 const STATIC_CACHE = `sales-roleplay-static-${VERSION}`;
 const PAGE_CACHE = `sales-roleplay-pages-${VERSION}`;
 
+// "/" sengaja tidak di-precache: halaman utama dilindungi login (bisa redirect ke /login).
 const PRECACHE_URLS = [
-  "/",
   "/manifest.json",
   "/icons/icon.svg",
   "/icons/icon-192.png",
@@ -53,6 +54,17 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+/** Rute yang tidak boleh pernah disajikan dari cache. */
+function isNeverCached(url) {
+  const p = url.pathname;
+  return (
+    p.startsWith("/api/") || // termasuk /api/auth/* dan /api/voice-turn
+    p === "/login" ||
+    p.startsWith("/login/") ||
+    p.startsWith("/auth/")
+  );
+}
+
 function isStaticAsset(url) {
   return (
     url.pathname.startsWith("/_next/static/") ||
@@ -68,14 +80,15 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
-  if (url.pathname.startsWith("/api/")) return;
+  if (isNeverCached(url)) return; // langsung ke jaringan, tanpa cache sama sekali
   if (url.pathname === "/sw.js") return;
 
   if (request.mode === "navigate") {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          if (response.ok) {
+          // Jangan simpan hasil redirect (mis. "/" → "/login") agar halaman login tidak tersimpan sebagai "/".
+          if (response.ok && !response.redirected && response.type === "basic") {
             const copy = response.clone();
             caches.open(PAGE_CACHE).then((cache) => cache.put(request, copy));
           }

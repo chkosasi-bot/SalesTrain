@@ -2,12 +2,14 @@
 
 import { Lightbulb, RotateCcw, Sparkles, ThumbsUp } from "lucide-react";
 import type { Evaluation, ScenarioSummary } from "@/lib/types";
+import type { ReactNode } from "react";
 
 interface Props {
   evaluation: Evaluation;
   scenario: ScenarioSummary;
   salesmanName: string;
   onRestart: () => void;
+  userSlot?: ReactNode;
 }
 
 function grade(score: number) {
@@ -17,7 +19,7 @@ function grade(score: number) {
   return { label: "Perlu Latihan", tone: "text-danger", ring: "var(--danger)" };
 }
 
-export default function ResultScreen({ evaluation, scenario, salesmanName, onRestart }: Props) {
+export default function ResultScreen({ evaluation, scenario, salesmanName, onRestart, userSlot }: Props) {
   const g = grade(evaluation.score);
   const radius = 52;
   const circumference = 2 * Math.PI * radius;
@@ -26,6 +28,7 @@ export default function ResultScreen({ evaluation, scenario, salesmanName, onRes
   return (
     <div className="flex min-h-dvh flex-col md:min-h-0">
       <main className="pt-safe flex-1 space-y-5 px-4 py-6 md:px-8 md:py-8">
+        {userSlot && <div className="border-b border-line pb-3">{userSlot}</div>}
         <div className="text-center">
           <p className="inline-flex items-center gap-1.5 rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-strong">
             <Sparkles className="h-3.5 w-3.5" aria-hidden /> Hasil Evaluasi

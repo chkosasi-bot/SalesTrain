@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import {
   ChevronRight,
   CircleCheck,
@@ -18,9 +19,11 @@ interface Props {
   salesmanName: string;
   onSalesmanNameChange: (name: string) => void;
   onStarted: (data: CreateSessionResponse) => void;
+  /** Identitas pengguna + tombol Keluar (ditampilkan di header). */
+  userSlot?: ReactNode;
 }
 
-export default function ScenarioPicker({ salesmanName, onSalesmanNameChange, onStarted }: Props) {
+export default function ScenarioPicker({ salesmanName, onSalesmanNameChange, onStarted, userSlot }: Props) {
   const [scenarios, setScenarios] = useState<ScenarioSummary[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -71,6 +74,7 @@ export default function ScenarioPicker({ salesmanName, onSalesmanNameChange, onS
   return (
     <div className="flex min-h-dvh flex-col md:min-h-0">
       <header className="pt-safe px-4 pb-2 md:px-8 md:pt-8">
+        {userSlot && <div className="mb-4 border-b border-line pb-3">{userSlot}</div>}
         <div className="flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-brand text-on-brand shadow-sm">
             <Mic className="h-6 w-6" aria-hidden />
@@ -85,7 +89,7 @@ export default function ScenarioPicker({ salesmanName, onSalesmanNameChange, onS
       <main className="flex-1 space-y-6 px-4 py-4 md:px-8">
         <section>
           <label htmlFor="salesman-name" className="mb-1.5 block text-sm font-medium">
-            Nama Salesman <span className="font-normal text-muted">(opsional)</span>
+            Nama Salesman <span className="font-normal text-muted">(otomatis dari profil, bisa diubah)</span>
           </label>
           <div className="relative">
             <UserRound className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted" aria-hidden />

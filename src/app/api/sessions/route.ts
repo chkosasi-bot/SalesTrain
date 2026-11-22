@@ -1,8 +1,10 @@
 import { getSupabaseAdmin } from "@/lib/supabase-server";
+import { getAuthUser } from "@/lib/supabase/server-auth";
+import { getProfile, profileDisplayName, upsertProfile } from "@/lib/profiles";
 import { errorMessage, isValidId, jsonError, jsonOk } from "@/lib/api-utils";
 import type { CreateSessionResponse, ScenarioSummary, SessionInfo } from "@/lib/types";
 
-// POST /api/sessions — membuat sesi latihan baru untuk skenario terpilih.
+// POST /api/sessions — membuat sesi latihan baru untuk skenario terpilih, terikat ke user yang login.
 export async function POST(request: Request) {
   let body: { scenario_id?: unknown; salesman_name?: unknown };
   try {
@@ -17,21 +19,30 @@ export async function POST(request: Request) {
   }
 
   const rawName = typeof body.salesman_name === "string" ? body.salesman_name.trim() : "";
-  const salesmanName = rawName ? rawName.slice(0, 80) : null;
 
   try {
     const supabase = getSupabaseAdmin();
 
-    const { data: scenario, error: scenarioError } = await supabase
-      .from("scenarios")
-      .select("id, title, description, customer_name, is_active")
-      .eq("id", String(scenarioId))
-      .maybeSingle();
+    const [user, scenarioRes] = await Promise.all([
+      getAuthUser(),
+      supabase
+        .from("scenarios")
+        .select("id, title, description, customer_name, is_active")
+        .eq("id", String(scenarioId))
+        .maybeSingle(),
+    ]);
 
+    if (!user) return jsonError("Silakan masuk terlebih dahulu.", 401);
+
+    const { data: scenario, error: scenarioError } = scenarioRes;
     if (scenarioError) throw scenarioError;
     if (!scenario || !scenario.is_active) {
       return jsonError("Skenario tidak ditemukan atau sudah tidak aktif.", 404);
     }
+
+    // sessions.user_id → FK ke profiles.id, jadi pastikan baris profil ada.
+    const profile = (await getProfile(user.id)) ?? (await upsertProfile(user.id, { email: user.email }));
+    const salesmanName = (rawName || profileDisplayName(profile, user.email)).slice(0, 80);
 
     const { data: session, error: sessionError } = await supabase
       .from("sessions")
@@ -39,6 +50,7 @@ export async function POST(request: Request) {
         scenario_id: scenario.id,
         salesman_name: salesmanName,
         status: "in_progress",
+        user_id: user.id,
       })
       .select("id, scenario_id, salesman_name, status")
       .single();

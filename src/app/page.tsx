@@ -4,7 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import ScenarioPicker from "@/components/ScenarioPicker";
 import SessionScreen from "@/components/SessionScreen";
 import ResultScreen from "@/components/ResultScreen";
-import type { CreateSessionResponse, Evaluation, ScenarioSummary, SessionInfo } from "@/lib/types";
+import UserMenu from "@/components/UserMenu";
+import { apiFetch } from "@/lib/api-client";
+import type { CreateSessionResponse, CurrentUser, Evaluation, MeResponse, ScenarioSummary, SessionInfo } from "@/lib/types";
 
 type Screen =
   | { name: "select" }
@@ -16,16 +18,29 @@ const NAME_KEY = "sales-roleplay:salesman-name";
 export default function Home() {
   const [screen, setScreen] = useState<Screen>({ name: "select" });
   const [salesmanName, setSalesmanName] = useState("");
+  const [user, setUser] = useState<CurrentUser | null>(null);
 
-  // Ingat nama salesman di perangkat ini (kenyamanan saja; aman bila storage tidak tersedia).
+  // Muat profil akun yang login; nama salesman otomatis diisi dari profil.
   useEffect(() => {
+    let savedName = "";
     try {
-      const saved = window.localStorage.getItem(NAME_KEY);
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- sinkronisasi sekali dari localStorage
-      if (saved) setSalesmanName(saved);
+      savedName = window.localStorage.getItem(NAME_KEY) ?? "";
     } catch {
       // storage diblokir
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- tampilkan nama terakhir selagi profil dimuat
+    if (savedName) setSalesmanName(savedName);
+
+    const controller = new AbortController();
+    apiFetch<MeResponse>("/api/auth/me", { signal: controller.signal })
+      .then(({ user: me }) => {
+        setUser(me);
+        setSalesmanName(me.full_name || savedName || me.display_name);
+      })
+      .catch(() => {
+        // 401 sudah diarahkan ke /login oleh apiFetch; error lain: tetap pakai nama tersimpan.
+      });
+    return () => controller.abort();
   }, []);
 
   const updateName = useCallback((name: string) => {
@@ -47,6 +62,15 @@ export default function Home() {
     window.scrollTo({ top: 0 });
   }, [screen.name]);
 
+  const userSlot = user ? (
+    <UserMenu user={user} />
+  ) : (
+    <div className="flex items-center gap-2" aria-busy="true" aria-label="Memuat akun">
+      <div className="h-9 w-9 animate-pulse rounded-full bg-surface-2" />
+      <div className="h-4 w-32 animate-pulse rounded bg-surface-2" />
+    </div>
+  );
+
   return (
     <div className="flex min-h-dvh justify-center md:items-center md:px-6 md:py-8">
       <div
@@ -55,7 +79,12 @@ export default function Home() {
         }`}
       >
         {screen.name === "select" && (
-          <ScenarioPicker salesmanName={salesmanName} onSalesmanNameChange={updateName} onStarted={handleStarted} />
+          <ScenarioPicker
+            salesmanName={salesmanName}
+            onSalesmanNameChange={updateName}
+            onStarted={handleStarted}
+            userSlot={userSlot}
+          />
         )}
 
         {screen.name === "session" && (
@@ -74,6 +103,7 @@ export default function Home() {
             scenario={screen.scenario}
             salesmanName={salesmanName}
             onRestart={backToSelect}
+            userSlot={userSlot}
           />
         )}
       </div>

@@ -1,6 +1,7 @@
 import { toFile } from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { getSupabaseAdmin } from "@/lib/supabase-server";
+import { getAuthUser, hasAuthCookie } from "@/lib/supabase/server-auth";
 import {
   CHAT_MODEL,
   MAX_CONTEXT_MESSAGES,
@@ -47,26 +48,30 @@ function extensionForMime(mime: string): string {
   return "webm";
 }
 
-async function transcribe(buffer: Buffer, mimeType: string): Promise<string> {
+async function transcribe(buffer: Buffer, mimeType: string, signal: AbortSignal): Promise<string> {
   const openai = getOpenAI();
   const filename = `ucapan.${extensionForMime(mimeType)}`;
   const baseType = mimeType.split(";")[0] || "audio/webm";
 
   const run = async (model: string) => {
     const file = await toFile(buffer, filename, { type: baseType });
-    const result = await openai.audio.transcriptions.create({
-      file,
-      model,
-      language: "id",
-      response_format: "json",
-      prompt: "Percakapan penjualan antara salesman dan pelanggan dalam Bahasa Indonesia.",
-    });
+    const result = await openai.audio.transcriptions.create(
+      {
+        file,
+        model,
+        language: "id",
+        response_format: "json",
+        prompt: "Percakapan penjualan antara salesman dan pelanggan dalam Bahasa Indonesia.",
+      },
+      { signal }
+    );
     return (result as { text?: string }).text?.trim() ?? "";
   };
 
   try {
     return await run(STT_MODEL_PRIMARY);
   } catch (err) {
+    if (signal.aborted) throw err;
     console.warn(`[voice-turn] STT ${STT_MODEL_PRIMARY} gagal, fallback ke ${STT_MODEL_FALLBACK}:`, errorMessage(err));
     return await run(STT_MODEL_FALLBACK);
   }
@@ -77,7 +82,7 @@ async function loadContext(sessionId: string) {
 
   const { data: session, error: sessionError } = await supabase
     .from("sessions")
-    .select("id, scenario_id, status")
+    .select("id, scenario_id, status, user_id")
     .eq("id", sessionId)
     .maybeSingle();
   if (sessionError) throw sessionError;
@@ -108,6 +113,7 @@ async function loadContext(sessionId: string) {
   const lastTurn = recentDesc.length ? Number(recentDesc[0].turn_order) || 0 : 0;
 
   return {
+    ownerId: (session.user_id as string | null) ?? null,
     scenario: scenarioRes.data as ScenarioContext,
     history: [...recentDesc].reverse(),
     lastTurn,
@@ -147,6 +153,9 @@ function normalizeRole(role: string): "user" | "assistant" {
 export async function POST(request: Request) {
   const startedAt = Date.now();
 
+  // Tolak segera (tanpa membaca audio / memanggil OpenAI) bila tidak ada cookie login sama sekali.
+  if (!(await hasAuthCookie())) return jsonError("Sesi login berakhir. Silakan masuk kembali.", 401);
+
   let form: FormData;
   try {
     form = await request.formData();
@@ -168,11 +177,30 @@ export async function POST(request: Request) {
     const buffer = Buffer.from(await audio.arrayBuffer());
     const mimeType = audio.type || "audio/webm";
 
-    // 1) STT dan pengambilan konteks berjalan paralel untuk menekan latensi.
-    const [userTranscript, context] = await Promise.all([
-      transcribe(buffer, mimeType),
-      loadContext(String(sessionId)),
-    ]);
+    // 1) STT, verifikasi login, dan pengambilan konteks berjalan paralel (tanpa tambahan latensi).
+    //    Bila login/kepemilikan sesi gagal, STT dibatalkan agar tidak menghabiskan kuota OpenAI.
+    const sttAbort = new AbortController();
+    const sttPromise = transcribe(buffer, mimeType, sttAbort.signal);
+    sttPromise.catch(() => undefined); // dicegah jadi unhandled rejection bila dibatalkan
+
+    let user: Awaited<ReturnType<typeof getAuthUser>>;
+    let context: Awaited<ReturnType<typeof loadContext>>;
+    try {
+      [user, context] = await Promise.all([getAuthUser(), loadContext(String(sessionId))]);
+    } catch (err) {
+      sttAbort.abort();
+      throw err;
+    }
+    if (!user) {
+      sttAbort.abort();
+      return jsonError("Sesi login berakhir. Silakan masuk kembali.", 401);
+    }
+    if (context.ownerId !== user.id) {
+      sttAbort.abort();
+      return jsonError("Sesi latihan ini bukan milik akun Anda.", 403);
+    }
+
+    const userTranscript = await sttPromise;
 
     if (!userTranscript) {
       return jsonError("Suara tidak terdengar jelas. Silakan coba bicara lagi.", 422);

@@ -52,6 +52,20 @@ export interface EvaluateSessionResponse {
   evaluation: Evaluation;
 }
 
+export interface CurrentUser {
+  id: string;
+  email: string | null;
+  full_name: string | null;
+  telegram_username: string | null;
+  telegram_chat_id: string | null;
+  display_name: string;
+  login_method: "email" | "telegram";
+}
+
+export interface MeResponse {
+  user: CurrentUser;
+}
+
 export interface ApiError {
   error: string;
 }

@@ -1,11 +1,14 @@
 import { connection } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-server";
+import { getAuthUser } from "@/lib/supabase/server-auth";
 import { errorMessage, jsonError, jsonOk } from "@/lib/api-utils";
 import type { ScenarioSummary, ScenariosResponse } from "@/lib/types";
 
 // GET /api/scenarios — daftar skenario aktif (tanpa system_prompt agar tidak bocor ke browser).
 export async function GET() {
   await connection(); // selalu dijalankan saat request, bukan saat build
+
+  if (!(await getAuthUser())) return jsonError("Silakan masuk terlebih dahulu.", 401);
 
   try {
     const supabase = getSupabaseAdmin();

@@ -19,7 +19,12 @@ Variabel lingkungan (`.env.local`):
 | --- | --- |
 | `OPENAI_API_KEY` | Kunci OpenAI (server saja) |
 | `NEXT_PUBLIC_SUPABASE_URL` | URL proyek Supabase |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Anon key — hanya untuk cookie sesi Supabase Auth (`@supabase/ssr`) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Service role key — hanya dipakai di API routes, tidak pernah dikirim ke browser |
+| `NEXT_PUBLIC_SITE_URL` | Opsional: origin publik untuk tautan login (default: origin request tepercaya, lalu `https://salestrain-xi.vercel.app`) |
+| `TELEGRAM_BOT_TOKEN` | Token bot Telegram (server saja) |
+| `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME` | Username bot (tanpa `@`) untuk tombol `t.me/...` di halaman login |
+| `TELEGRAM_WEBHOOK_SECRET` | Opsional tapi disarankan: rahasia webhook, divalidasi lewat header `X-Telegram-Bot-Api-Secret-Token` |
 
 > Mikrofon hanya bisa diakses lewat **HTTPS** atau `localhost`. Untuk uji di HP, deploy (mis. Vercel) atau gunakan tunnel HTTPS.
 
@@ -39,6 +44,30 @@ src/app/api/sessions        POST — buat sesi (status: in_progress)
 src/app/api/voice-turn      POST — FormData(audio, session_id) → STT → LLM → TTS → JSON
 src/app/api/evaluate-session POST — nilai transkrip, simpan skor, status: completed
 ```
+
+## Autentikasi (Magic Link tanpa password)
+
+```
+src/proxy.ts                         Refresh cookie sesi; "/" wajib login → /login; /login saat sudah login → "/"
+src/app/login                        Halaman login 2 tab (Email / Telegram)
+src/app/api/auth/email               POST — signInWithOtp, emailRedirectTo = <origin>/auth/callback
+src/app/auth/callback                GET  — tukar ?code= (PKCE) atau ?token_hash=&type= → sesi, sinkron ke profiles
+src/app/api/telegram/webhook         POST — balas /start dengan Telegram Chat ID
+src/app/api/auth/telegram/request-link POST — token acak sekali pakai (15 menit, disimpan sebagai hash SHA-256) → kirim via bot
+src/app/auth/telegram                GET  — klaim token atomik, buat/cari user (<chat_id>@telegram.salestrain.local),
+                                            generateLink(magiclink) + verifyOtp → cookie sesi standar Supabase
+src/app/api/auth/telegram/verify     GET  — alias ke /auth/telegram
+src/app/api/auth/me | logout         Profil user aktif | keluar
+supabase/migrations/*.sql            Perbaikan trigger auth.users → profiles (jalankan di SQL Editor)
+scripts/set-telegram-webhook.mjs     Daftarkan webhook bot ke domain produksi
+```
+
+- Semua API (kecuali `/api/auth/*` & webhook) mewajibkan login; `/api/voice-turn` & `/api/evaluate-session` juga memastikan sesi latihan milik user tersebut.
+- Pengecekan login di `/api/voice-turn` berjalan **paralel** dengan STT (tanpa tambahan latensi); STT dibatalkan bila login tidak valid.
+- Proxy hanya berjalan di `/` dan `/login` — tidak di `/api/*`, aset statis, `sw.js` atau manifest.
+- Supabase Dashboard → Authentication → URL Configuration: tambahkan `https://<domain>/auth/callback` dan `http://localhost:3000/auth/callback` ke **Redirect URLs**.
+- Tautan email (PKCE) harus dibuka di browser yang sama dengan tempat meminta. Agar bisa dibuka di browser mana saja, ubah template email Magic Link menjadi
+  `{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=magiclink` (callback mendukung keduanya).
 
 ## Alur `/api/voice-turn`
 
