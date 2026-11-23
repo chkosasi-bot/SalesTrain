@@ -5,7 +5,7 @@
  * - Tidak pernah meng-cache /api/* (data sesi & audio selalu dari jaringan)
  * - Tidak pernah meng-cache /login, /auth/* dan /api/auth/* (alur login & cookie sesi)
  */
-const VERSION = "v2";
+const VERSION = "v3";
 const STATIC_CACHE = `sales-roleplay-static-${VERSION}`;
 const PAGE_CACHE = `sales-roleplay-pages-${VERSION}`;
 

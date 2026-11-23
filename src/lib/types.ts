@@ -66,6 +66,31 @@ export interface MeResponse {
   user: CurrentUser;
 }
 
+export interface RequestLoginResponse {
+  requestId: string;
+  matchCode: string;
+  expiresAt: string;
+  channel: "email" | "telegram";
+}
+
+export interface PollLoginResponse {
+  status: "pending" | "signed_in" | "expired" | "consumed";
+  expiresAt?: string;
+}
+
+export interface ConfirmInfoResponse {
+  channel: "email" | "telegram";
+  identifier: string;
+  matchCode: string;
+  status: "pending" | "verified" | "consumed" | "expired";
+  sameDevice: boolean;
+  expiresAt: string;
+}
+
+export interface ConfirmResultResponse {
+  result: "signed_in" | "verified";
+}
+
 export interface ApiError {
   error: string;
 }

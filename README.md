@@ -49,14 +49,14 @@ src/app/api/evaluate-session POST — nilai transkrip, simpan skor, status: comp
 
 ```
 src/proxy.ts                         Refresh cookie sesi; "/" wajib login → /login; /login saat sudah login → "/"
-src/app/login                        Halaman login 2 tab (Email / Telegram)
-src/app/api/auth/email               POST — signInWithOtp, emailRedirectTo = <origin>/auth/callback
-src/app/auth/callback                GET  — tukar ?code= (PKCE) atau ?token_hash=&type= → sesi, sinkron ke profiles
+src/app/login                        Halaman login 2 tab (Email / Telegram) + layar "Menunggu konfirmasi" (polling 2,5 dtk)
+src/app/api/auth/request-login       POST — buat tiket public.login_requests (pending, 15 menit) + cookie httpOnly pengikat
+                                            browser; kirim tautan /auth/confirm?req_id&secret via Telegram Bot / email Supabase
+src/app/auth/confirm                 Halaman konfirmasi (HP / perangkat mana pun): kode pencocokan + tombol konfirmasi
+src/app/api/auth/confirm-login       GET info tiket | POST verifikasi → status 'verified' (+ langsung login bila browser sama)
+src/app/api/auth/poll-login          GET  — laptop: 'verified' → 'consumed' + generateLink/verifyOtp → cookie sesi di laptop
+src/app/auth/callback                GET  — kompatibilitas: tukar ?code= / ?token_hash= → sesi
 src/app/api/telegram/webhook         POST — balas /start dengan Telegram Chat ID
-src/app/api/auth/telegram/request-link POST — token acak sekali pakai (15 menit, disimpan sebagai hash SHA-256) → kirim via bot
-src/app/auth/telegram                GET  — klaim token atomik, buat/cari user (<chat_id>@telegram.salestrain.local),
-                                            generateLink(magiclink) + verifyOtp → cookie sesi standar Supabase
-src/app/api/auth/telegram/verify     GET  — alias ke /auth/telegram
 src/app/api/auth/me | logout         Profil user aktif | keluar
 supabase/migrations/*.sql            Perbaikan trigger auth.users → profiles (jalankan di SQL Editor)
 scripts/set-telegram-webhook.mjs     Daftarkan webhook bot ke domain produksi
@@ -65,10 +65,18 @@ scripts/set-telegram-webhook.mjs     Daftarkan webhook bot ke domain produksi
 - Semua API (kecuali `/api/auth/*` & webhook) mewajibkan login; `/api/voice-turn` & `/api/evaluate-session` juga memastikan sesi latihan milik user tersebut.
 - Pengecekan login di `/api/voice-turn` berjalan **paralel** dengan STT (tanpa tambahan latensi); STT dibatalkan bila login tidak valid.
 - Proxy hanya berjalan di `/` dan `/login` — tidak di `/api/*`, aset statis, `sw.js` atau manifest.
-- Supabase Dashboard → Authentication → URL Configuration: tambahkan `https://<domain>/auth/callback` dan `http://localhost:3000/auth/callback` ke **Redirect URLs**.
-- Tautan email (PKCE) harus dibuka di browser yang sama dengan tempat meminta. Agar bisa dibuka di browser mana saja, ubah template email
-  **Magic Link** dan **Confirm signup** (dipakai untuk user baru) menjadi
-  `{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=email` (callback mendukung keduanya).
+- **Login lintas perangkat:** mulai di laptop, konfirmasi di HP, laptop masuk otomatis. Tidak memakai PKCE:
+  email dikirim lewat implicit flow (token di fragment URL dibaca halaman `/auth/confirm`, lalu sesi sementara di HP dicabut),
+  Telegram dibuktikan oleh tautan rahasia yang hanya dikirim ke chat pemilik. Sesi laptop dibuat server-side
+  (`generateLink` + `verifyOtp`) saat polling.
+- Keamanan tiket: `verify_secret` disimpan sebagai hash SHA-256; polling hanya diterima dari browser yang punya cookie
+  httpOnly `st_login_req` (HMAC dari `req_id`, kunci `LOGIN_REQUEST_SECRET` atau service role key); konfirmasi dari perangkat lain
+  wajib menekan tombol dan menampilkan **kode pencocokan** 2 digit yang sama dengan layar laptop (melindungi dari pemindai
+  tautan email & phishing). Status: `pending → verified → consumed` (atau `expired`).
+- Supabase Dashboard → Authentication → URL Configuration → **Redirect URLs**: tambahkan `https://<domain>/**` dan
+  `http://localhost:3000/**` (tautan email berisi query `req_id` & `secret`).
+- Template email bawaan Supabase sudah cukup. Template kustom dengan `{{ .TokenHash }}` juga didukung:
+  `{{ .RedirectTo }}&token_hash={{ .TokenHash }}`.
 - Butuh trigger `auth.users → profiles` yang sehat: lihat `supabase/migrations/20261122_fix_auth_user_trigger.sql`.
 
 ## Alur `/api/voice-turn`

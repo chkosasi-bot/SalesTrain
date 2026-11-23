@@ -1,23 +1,7 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-
-export const MAGIC_LINK_TTL_MINUTES = 15;
+import { timingSafeEqual } from "node:crypto";
 
 /** Chat ID pribadi Telegram berupa bilangan bulat positif. */
 export const CHAT_ID_RE = /^\d{4,20}$/;
-
-/** Token mentah hanya dikirim ke pengguna; di database disimpan hash SHA-256-nya. */
-export function createMagicToken(): { token: string; tokenHash: string } {
-  const token = randomBytes(32).toString("base64url");
-  return { token, tokenHash: hashMagicToken(token) };
-}
-
-export function hashMagicToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
-
-export function isWellFormedToken(token: string | null): token is string {
-  return !!token && /^[A-Za-z0-9_-]{43}$/.test(token);
-}
 
 export function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
