@@ -4,9 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import ScenarioPicker from "@/components/ScenarioPicker";
 import SessionScreen from "@/components/SessionScreen";
 import ResultScreen from "@/components/ResultScreen";
-import UserMenu from "@/components/UserMenu";
-import { apiFetch } from "@/lib/api-client";
-import type { CreateSessionResponse, CurrentUser, Evaluation, MeResponse, ScenarioSummary, SessionInfo } from "@/lib/types";
+import AppTopBar from "@/components/AppTopBar";
+import MasteryStatusBanner from "@/components/MasteryStatusBanner";
+import { useCurrentUser } from "@/lib/use-current-user";
+import type { CreateSessionResponse, Evaluation, ScenarioSummary, SessionInfo } from "@/lib/types";
 
 type Screen =
   | { name: "select" }
@@ -18,9 +19,9 @@ const NAME_KEY = "sales-roleplay:salesman-name";
 export default function Home() {
   const [screen, setScreen] = useState<Screen>({ name: "select" });
   const [salesmanName, setSalesmanName] = useState("");
-  const [user, setUser] = useState<CurrentUser | null>(null);
+  const user = useCurrentUser();
 
-  // Muat profil akun yang login; nama salesman otomatis diisi dari profil.
+  // Nama salesman otomatis diisi dari profil akun (nama tersimpan di perangkat dipakai sementara).
   useEffect(() => {
     let savedName = "";
     try {
@@ -28,20 +29,10 @@ export default function Home() {
     } catch {
       // storage diblokir
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- tampilkan nama terakhir selagi profil dimuat
-    if (savedName) setSalesmanName(savedName);
-
-    const controller = new AbortController();
-    apiFetch<MeResponse>("/api/auth/me", { signal: controller.signal })
-      .then(({ user: me }) => {
-        setUser(me);
-        setSalesmanName(me.full_name || savedName || me.display_name);
-      })
-      .catch(() => {
-        // 401 sudah diarahkan ke /login oleh apiFetch; error lain: tetap pakai nama tersimpan.
-      });
-    return () => controller.abort();
-  }, []);
+    const name = user ? user.full_name || savedName || user.display_name : savedName;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sinkron nama dari profil saat akun selesai dimuat
+    if (name) setSalesmanName(name);
+  }, [user]);
 
   const updateName = useCallback((name: string) => {
     setSalesmanName(name);
@@ -62,12 +53,11 @@ export default function Home() {
     window.scrollTo({ top: 0 });
   }, [screen.name]);
 
-  const userSlot = user ? (
-    <UserMenu user={user} />
-  ) : (
-    <div className="flex items-center gap-2" aria-busy="true" aria-label="Memuat akun">
-      <div className="h-9 w-9 animate-pulse rounded-full bg-surface-2" />
-      <div className="h-4 w-32 animate-pulse rounded bg-surface-2" />
+  const userSlot = <AppTopBar />;
+  const selectSlot = (
+    <div className="space-y-3">
+      <AppTopBar />
+      <MasteryStatusBanner />
     </div>
   );
 
@@ -83,7 +73,7 @@ export default function Home() {
             salesmanName={salesmanName}
             onSalesmanNameChange={updateName}
             onStarted={handleStarted}
-            userSlot={userSlot}
+            userSlot={selectSlot}
           />
         )}
 

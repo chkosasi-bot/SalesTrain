@@ -79,6 +79,26 @@ scripts/set-telegram-webhook.mjs     Daftarkan webhook bot ke domain produksi
   `{{ .RedirectTo }}&token_hash={{ .TokenHash }}`.
 - Butuh trigger `auth.users → profiles` yang sehat: lihat `supabase/migrations/20261122_fix_auth_user_trigger.sql`.
 
+## Product Mastery (`/mastery`)
+
+```
+src/app/mastery                      Katalog produk aktif + progres kelulusan
+src/app/mastery/[id]                 Tab: 4P & Promo | Kompetitor (Battlecard) | Kuis Pemahaman
+src/app/api/mastery                  GET  — own_products aktif + jumlah kompetitor + status kuis user
+src/app/api/mastery/[id]             GET  — materi lengkap + competitor_products (compared_own_product_id) + riwayat
+src/app/api/mastery/[id]/generate-quiz POST — 5 soal pilihan ganda (gpt-4o-mini) dari data produk & kompetitor
+src/app/api/mastery/[id]/submit-quiz   POST — skor 0–100 (lulus ≥ 80), simpan ke assessment_attempts, kembalikan pembahasan
+src/components/AppTopBar.tsx         Navigasi utama Simulasi ↔ Materi Produk + identitas user
+src/components/MasteryStatusBanner   Indikator kelulusan di halaman simulasi (tidak memblokir simulasi)
+```
+
+- Kunci jawaban & pembahasan **tidak pernah dikirim ke browser sebelum submit**: soal disegel dalam `quizToken`
+  (AES-256-GCM, terikat user & produk, berlaku 60 menit). Satu kuis hanya bisa dinilai sekali; posisi jawaban benar diacak.
+- `assessment_attempts`: `attempt_type = 'post_test'` (satu-satunya nilai yang diterima check constraint saat ini),
+  `related_product_id`, `score`, `passing_threshold = 80`, `passed`, `weak_topics_json` (topik yang salah),
+  `details_json` (`module: "product_mastery"`, `quiz_id`, soal, jawaban, pembahasan).
+- Status lulus per produk = pernah lulus minimal sekali; Product Mastery lulus bila semua produk aktif lulus.
+
 ## Alur `/api/voice-turn`
 
 1. STT (`gpt-4o-mini-transcribe`, fallback `whisper-1`, bahasa `id`) **paralel** dengan pengambilan sesi, skenario & 11 pesan terakhir.

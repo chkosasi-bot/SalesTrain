@@ -2,10 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
 /** Halaman yang wajib login. API routes memeriksa sesi sendiri (lihat getAuthUser). */
-const PROTECTED_PATHS = ["/"];
-
 function isProtected(pathname: string) {
-  return PROTECTED_PATHS.includes(pathname);
+  return pathname === "/" || pathname === "/mastery" || pathname.startsWith("/mastery/");
 }
 
 /**
@@ -62,5 +60,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/", "/login"],
+  matcher: ["/", "/login", "/mastery", "/mastery/:path*"],
 };
