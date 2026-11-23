@@ -15,13 +15,13 @@ import {
   Volume2,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
+import { getMicStream, getSharedAudio, isAudioUnlocked, releaseMicStream, unlockAudioPlayback, warmUpMicrophone } from "@/lib/audio-session";
 import {
   base64ToObjectUrl,
   extensionForMime,
   formatDuration,
   isRecordingSupported,
   pickRecorderMimeType,
-  silentWavDataUri,
 } from "@/lib/audio";
 import type {
   ChatMessage,
@@ -80,7 +80,6 @@ export default function SessionScreen({ session, context, onEvaluated, onExit }:
   const recordStartRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audioUnlockedRef = useRef(false);
   const lastAudioUrlRef = useRef<string | null>(null);
   /** URL klip balasan yang sedang aktif; event dari klip lain (lama / audio unlock) diabaikan. */
   const activeClipUrlRef = useRef<string | null>(null);
@@ -98,23 +97,32 @@ export default function SessionScreen({ session, context, onEvaluated, onExit }:
   }, []);
 
   // ---------- Audio playback ----------
+  // Elemen <audio> bersama yang sudah "dibuka" saat pengguna mengetuk "Mulai Simulasi" (lihat audio-session.ts).
   const getAudio = useCallback((): HTMLAudioElement => {
-    if (!audioRef.current) {
-      const audio = new Audio();
-      audio.preload = "auto";
-      audio.setAttribute("playsinline", "true");
-      const isActiveClip = () => !!activeClipUrlRef.current && audio.src === activeClipUrlRef.current;
-      audio.addEventListener("ended", () => {
-        if (isActiveClip() && phaseRef.current === "playing") setPhase("idle");
-      });
-      audio.addEventListener("error", () => {
-        if (!isActiveClip() || !mountedRef.current) return;
-        if (phaseRef.current === "playing") setPhase("idle");
-        setHint("Audio balasan gagal dimuat. Ketuk “Putar Ulang” atau baca transkrip.");
-      });
-      audioRef.current = audio;
-    }
+    audioRef.current ??= getSharedAudio();
     return audioRef.current;
+  }, []);
+
+  useEffect(() => {
+    const audio = getSharedAudio();
+    audioRef.current = audio;
+    const isActiveClip = () => !!activeClipUrlRef.current && audio.src === activeClipUrlRef.current;
+    const onEnded = () => {
+      if (isActiveClip() && phaseRef.current === "playing") setPhase("idle");
+    };
+    const onError = () => {
+      if (!isActiveClip() || !mountedRef.current) return;
+      if (phaseRef.current === "playing") setPhase("idle");
+      setHint("Audio balasan gagal dimuat. Ketuk “Putar Ulang” atau baca transkrip.");
+    };
+    audio.addEventListener("ended", onEnded);
+    audio.addEventListener("error", onError);
+    // Nyalakan mikrofon sejak layar sesi terbuka agar tekanan pertama langsung merekam.
+    warmUpMicrophone();
+    return () => {
+      audio.removeEventListener("ended", onEnded);
+      audio.removeEventListener("error", onError);
+    };
   }, [setPhase]);
 
   const stopPlayback = useCallback(() => {
@@ -123,20 +131,6 @@ export default function SessionScreen({ session, context, onEvaluated, onExit }:
     if (audio && !audio.paused) audio.pause();
     if (phaseRef.current === "playing") setPhase("idle");
   }, [setPhase]);
-
-  /** Wajib dipanggil di dalam gesture pengguna agar autoplay diizinkan (iOS Safari). */
-  const unlockAudio = useCallback(() => {
-    if (audioUnlockedRef.current) return;
-    const audio = getAudio();
-    audioUnlockedRef.current = true;
-    activeClipUrlRef.current = null; // klip hening bukan balasan AI
-    audio.src = silentWavDataUri();
-    audio.play().catch((err: unknown) => {
-      // Hanya penolakan izin yang berarti elemen belum terbuka; AbortError terjadi
-      // ketika klip hening digantikan balasan AI, dan itu normal.
-      if (err instanceof DOMException && err.name === "NotAllowedError") audioUnlockedRef.current = false;
-    });
-  }, [getAudio]);
 
   /**
    * Memuat & memutar klip balasan dengan bersih: reset elemen, pasang sumber baru, load(), play().
@@ -232,11 +226,7 @@ export default function SessionScreen({ session, context, onEvaluated, onExit }:
   };
 
   const getStream = async (): Promise<MediaStream> => {
-    const existing = streamRef.current;
-    if (existing && existing.getAudioTracks().some((t) => t.readyState === "live")) return existing;
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-    });
+    const stream = await getMicStream();
     streamRef.current = stream;
     return stream;
   };
@@ -244,14 +234,8 @@ export default function SessionScreen({ session, context, onEvaluated, onExit }:
   const stopRecording = useCallback(() => {
     pressingRef.current = false;
     const rec = recorderRef.current;
-    if (rec && rec.state === "recording") {
-      try {
-        rec.requestData();
-      } catch {
-        // abaikan, sebagian browser tidak mendukung requestData saat stop
-      }
-      rec.stop();
-    }
+    // Tanpa requestData(): di Safari memanggilnya tepat sebelum stop() bisa menghasilkan potongan kosong.
+    if (rec && rec.state === "recording") rec.stop();
     clearTimer();
   }, []);
 
@@ -268,7 +252,8 @@ export default function SessionScreen({ session, context, onEvaluated, onExit }:
     setError(null);
     setHint(null);
     stopPlayback(); // menyela suara AI bila sedang diputar
-    unlockAudio();
+    // Catatan iOS: JANGAN memutar audio (unlock) di sini — memulai pemutaran bersamaan dengan
+    // perekaman membuat iOS mengganti mode audio dan rekaman pertama nyaris kosong.
 
     let stream: MediaStream;
     try {
@@ -306,6 +291,10 @@ export default function SessionScreen({ session, context, onEvaluated, onExit }:
     recorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
     };
+    recorder.onstart = () => {
+      // Waktu mulai yang sebenarnya (di iOS start() bisa tertunda beberapa ratus ms).
+      recordStartRef.current = Date.now();
+    };
     recorder.onstop = () => {
       recorderRef.current = null;
       clearTimer();
@@ -314,9 +303,15 @@ export default function SessionScreen({ session, context, onEvaluated, onExit }:
       const type = recorder.mimeType || mimeType || "audio/webm";
       const blob = new Blob(chunksRef.current, { type });
       chunksRef.current = [];
-      if (duration < MIN_RECORDING_MS || blob.size < 1_000) {
+      if (duration < MIN_RECORDING_MS) {
         setPhase("idle");
         setHint("Rekaman terlalu singkat — tahan tombol selama Anda berbicara.");
+        return;
+      }
+      if (blob.size < 1_000) {
+        // Ditahan cukup lama tetapi tidak ada data: mikrofon belum siap / sempat terganggu.
+        setPhase("idle");
+        setHint("Suara belum tertangkap — mikrofon sedang disiapkan. Tekan & tahan sekali lagi.");
         return;
       }
       void sendTurn(blob);
@@ -325,7 +320,8 @@ export default function SessionScreen({ session, context, onEvaluated, onExit }:
     recorderRef.current = recorder;
     recordStartRef.current = Date.now();
     setElapsedMs(0);
-    recorder.start(250);
+    // Tanpa timeslice: seluruh rekaman diserahkan saat stop() — paling andal di Safari/iOS (audio/mp4).
+    recorder.start();
     setPhase("recording");
     if ("vibrate" in navigator) navigator.vibrate?.(15);
 
@@ -334,7 +330,13 @@ export default function SessionScreen({ session, context, onEvaluated, onExit }:
       setElapsedMs(ms);
       if (ms >= MAX_RECORDING_MS) stopRecording();
     }, 200);
-  }, [evaluating, sendTurn, setPhase, stopPlayback, stopRecording, supported, unlockAudio]);
+  }, [evaluating, sendTurn, setPhase, stopPlayback, stopRecording, supported]);
+
+  /** Lepas tombol: hentikan rekaman, lalu (bila belum) buka pemutar audio — aman karena perekaman sudah selesai. */
+  const releaseTalk = useCallback(() => {
+    stopRecording();
+    if (!isAudioUnlocked()) unlockAudioPlayback();
+  }, [stopRecording]);
 
   // ---------- Pointer & keyboard handlers ----------
   const onPointerDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
@@ -350,7 +352,7 @@ export default function SessionScreen({ session, context, onEvaluated, onExit }:
 
   const onPointerUp = (e: ReactPointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
-    stopRecording();
+    releaseTalk();
   };
 
   const onButtonKeyDown = (e: ReactKeyboardEvent<HTMLButtonElement>) => {
@@ -363,7 +365,7 @@ export default function SessionScreen({ session, context, onEvaluated, onExit }:
   const onButtonKeyUp = (e: ReactKeyboardEvent<HTMLButtonElement>) => {
     if (e.key === " " || e.key === "Enter") {
       e.preventDefault();
-      stopRecording();
+      releaseTalk();
     }
   };
 
@@ -406,7 +408,8 @@ export default function SessionScreen({ session, context, onEvaluated, onExit }:
       abortRef.current?.abort();
       const rec = recorderRef.current;
       if (rec && rec.state !== "inactive") rec.stop();
-      streamRef.current?.getTracks().forEach((t) => t.stop());
+      // Matikan mikrofon saat keluar dari sesi (indikator mic iOS ikut padam).
+      releaseMicStream();
       streamRef.current = null;
       // eslint-disable-next-line react-hooks/exhaustive-deps -- penghitung biasa, bukan ref ke node DOM
       playTokenRef.current++;

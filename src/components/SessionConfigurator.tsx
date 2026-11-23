@@ -19,6 +19,7 @@ import {
   Volume2,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
+import { unlockAudioPlayback, warmUpMicrophone } from "@/lib/audio-session";
 import type {
   ChallengeMode,
   CreateSessionResponse,
@@ -211,6 +212,10 @@ export default function SessionConfigurator({ salesmanName, onSalesmanNameChange
 
   const start = async () => {
     if (!canStart) return;
+    // Harus sinkron di dalam ketukan ini (gesture): buka pemutar audio iOS & nyalakan mikrofon lebih awal,
+    // supaya tekanan tombol rekam pertama langsung tertangkap dan balasan AI bisa diputar otomatis.
+    unlockAudioPlayback();
+    warmUpMicrophone();
     setStarting(true);
     setStartError(null);
     writePrefs({ product: productId, customer: customerId, focus, mode });
