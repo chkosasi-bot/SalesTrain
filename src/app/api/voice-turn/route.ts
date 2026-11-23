@@ -8,11 +8,18 @@ import {
   STT_MODEL_FALLBACK,
   STT_MODEL_PRIMARY,
   TTS_MODEL,
+  DEFAULT_CUSTOMER_VOICE,
+  DEFAULT_TTS_SPEED,
   getOpenAI,
+  resolveTtsSpeed,
   resolveTtsVoice,
+  type TtsVoice,
 } from "@/lib/openai-server";
 import { errorMessage, isValidId, jsonError, jsonOk } from "@/lib/api-utils";
-import type { VoiceTurnResponse } from "@/lib/types";
+import { COMPETITOR_COLUMNS, OWN_PRODUCT_COLUMNS } from "@/lib/mastery";
+import { CUSTOMER_COLUMNS, isChallengeMode, isScenarioFocus, type CustomerRow } from "@/lib/simulation";
+import { buildCustomerPersonaPrompt } from "@/lib/persona";
+import type { CompetitorProduct, OwnProduct, VoiceTurnResponse } from "@/lib/types";
 
 export const maxDuration = 60;
 
@@ -77,12 +84,25 @@ async function transcribe(buffer: Buffer, mimeType: string, signal: AbortSignal)
   }
 }
 
-async function loadContext(sessionId: string) {
+interface TurnContext {
+  ownerId: string | null;
+  systemPrompt: string;
+  voice: TtsVoice;
+  speed: number;
+  history: DbMessage[];
+  lastTurn: number;
+}
+
+/**
+ * Memuat semua yang dibutuhkan satu giliran dalam 2 putaran query paralel:
+ * (1) baris sesi, (2) pelanggan + produk + kompetitor + riwayat pesan — atau skenario lama + riwayat.
+ */
+async function loadContext(sessionId: string): Promise<TurnContext> {
   const supabase = getSupabaseAdmin();
 
   const { data: session, error: sessionError } = await supabase
     .from("sessions")
-    .select("id, scenario_id, status, user_id")
+    .select("id, scenario_id, status, user_id, own_product_id, customer_id, scenario_focus, challenge_mode")
     .eq("id", sessionId)
     .maybeSingle();
   if (sessionError) throw sessionError;
@@ -91,32 +111,69 @@ async function loadContext(sessionId: string) {
     throw new HttpError(409, "Sesi ini sudah selesai dinilai. Mulai sesi baru untuk berlatih lagi.");
   }
 
+  const historyQuery = supabase
+    .from("messages")
+    .select("role, content, turn_order")
+    .eq("session_id", sessionId)
+    .order("turn_order", { ascending: false })
+    .limit(MAX_CONTEXT_MESSAGES - 1);
+
+  const finish = (historyRes: { data: unknown; error: unknown }) => {
+    if (historyRes.error) throw historyRes.error;
+    const recentDesc = (historyRes.data ?? []) as DbMessage[];
+    return { history: [...recentDesc].reverse(), lastTurn: recentDesc.length ? Number(recentDesc[0].turn_order) || 0 : 0 };
+  };
+
+  // Sesi baru: persona dinamis dari customers + own_products + competitor_products.
+  if (session.customer_id && session.own_product_id) {
+    const [customerRes, productRes, competitorsRes, historyRes] = await Promise.all([
+      supabase.from("customers").select(CUSTOMER_COLUMNS).eq("id", session.customer_id).maybeSingle(),
+      supabase.from("own_products").select(OWN_PRODUCT_COLUMNS).eq("id", session.own_product_id).maybeSingle(),
+      supabase
+        .from("competitor_products")
+        .select(COMPETITOR_COLUMNS)
+        .eq("compared_own_product_id", session.own_product_id)
+        .eq("is_active", true)
+        .order("competitor_code"),
+      historyQuery,
+    ]);
+    if (customerRes.error) throw customerRes.error;
+    if (productRes.error) throw productRes.error;
+    if (competitorsRes.error) throw competitorsRes.error;
+    if (!customerRes.data) throw new HttpError(404, "Profil pelanggan untuk sesi ini tidak ditemukan.");
+    if (!productRes.data) throw new HttpError(404, "Produk untuk sesi ini tidak ditemukan.");
+
+    const customer = customerRes.data as unknown as CustomerRow;
+    return {
+      ownerId: (session.user_id as string | null) ?? null,
+      systemPrompt: buildCustomerPersonaPrompt({
+        customer,
+        product: productRes.data as unknown as OwnProduct,
+        competitors: (competitorsRes.data ?? []) as unknown as CompetitorProduct[],
+        focus: isScenarioFocus(session.scenario_focus) ? session.scenario_focus : null,
+        challengeMode: isChallengeMode(session.challenge_mode) ? session.challenge_mode : null,
+      }),
+      voice: resolveTtsVoice(customer.tts_voice, DEFAULT_CUSTOMER_VOICE),
+      speed: resolveTtsSpeed(customer.tts_speed),
+      ...finish(historyRes),
+    };
+  }
+
+  // Sesi lama berbasis tabel scenarios (kompatibilitas).
+  if (!session.scenario_id) throw new HttpError(404, "Sesi ini tidak memiliki produk/pelanggan.");
   const [scenarioRes, historyRes] = await Promise.all([
-    supabase
-      .from("scenarios")
-      .select("system_prompt, customer_name, title, voice_id")
-      .eq("id", session.scenario_id)
-      .maybeSingle(),
-    supabase
-      .from("messages")
-      .select("role, content, turn_order")
-      .eq("session_id", sessionId)
-      .order("turn_order", { ascending: false })
-      .limit(MAX_CONTEXT_MESSAGES - 1),
+    supabase.from("scenarios").select("system_prompt, customer_name, title, voice_id").eq("id", session.scenario_id).maybeSingle(),
+    historyQuery,
   ]);
-
   if (scenarioRes.error) throw scenarioRes.error;
-  if (historyRes.error) throw historyRes.error;
   if (!scenarioRes.data) throw new HttpError(404, "Skenario untuk sesi ini tidak ditemukan.");
-
-  const recentDesc = (historyRes.data ?? []) as DbMessage[];
-  const lastTurn = recentDesc.length ? Number(recentDesc[0].turn_order) || 0 : 0;
-
+  const scenario = scenarioRes.data as ScenarioContext;
   return {
     ownerId: (session.user_id as string | null) ?? null,
-    scenario: scenarioRes.data as ScenarioContext,
-    history: [...recentDesc].reverse(),
-    lastTurn,
+    systemPrompt: buildSystemPrompt(scenario),
+    voice: resolveTtsVoice(scenario.voice_id),
+    speed: DEFAULT_TTS_SPEED,
+    ...finish(historyRes),
   };
 }
 
@@ -211,7 +268,7 @@ export async function POST(request: Request) {
     const userTurn = context.lastTurn + 1;
 
     const llmMessages: ChatCompletionMessageParam[] = [
-      { role: "system", content: buildSystemPrompt(context.scenario) },
+      { role: "system", content: context.systemPrompt },
       ...context.history.map(
         (m): ChatCompletionMessageParam => ({ role: normalizeRole(m.role), content: m.content })
       ),
@@ -240,12 +297,8 @@ export async function POST(request: Request) {
       cleanReply(completion.choices[0]?.message?.content ?? "") ||
       "Maaf, saya kurang menangkap maksud Anda. Bisa diulang?";
 
-    // Voice diambil dari scenarios.voice_id; hanya jatuh ke "onyx" bila kosong / tidak valid.
-    const rawVoiceId = context.scenario.voice_id;
-    const voice = resolveTtsVoice(rawVoiceId);
-    if (typeof rawVoiceId === "string" && rawVoiceId.trim() && rawVoiceId.trim().toLowerCase() !== voice) {
-      console.warn(`[voice-turn] voice_id "${rawVoiceId}" tidak valid untuk ${TTS_MODEL}, memakai "${voice}".`);
-    }
+    // Suara per pelanggan: customers.tts_voice & tts_speed (fallback "nova" & 1.0); sesi lama: scenarios.voice_id.
+    const { voice, speed } = context;
 
     // 3) TTS & simpan balasan AI secara paralel.
     const [speechResult, assistantInsert] = await Promise.all([
@@ -253,6 +306,7 @@ export async function POST(request: Request) {
         .create({
           model: TTS_MODEL,
           voice,
+          speed,
           input: assistantReply,
           response_format: "mp3",
         })
@@ -271,7 +325,7 @@ export async function POST(request: Request) {
 
     if (assistantInsert.error) throw assistantInsert.error;
 
-    console.info(`[voice-turn] sesi ${sessionId} giliran ${userTurn} (voice: ${voice}) selesai dalam ${Date.now() - startedAt}ms`);
+    console.info(`[voice-turn] sesi ${sessionId} giliran ${userTurn} (voice: ${voice}, speed: ${speed}) selesai dalam ${Date.now() - startedAt}ms`);
 
     const body: VoiceTurnResponse = {
       userTranscript,
@@ -279,6 +333,7 @@ export async function POST(request: Request) {
       audioBase64: speechResult,
       audioMimeType: "audio/mpeg",
       voice,
+      speed,
     };
     return jsonOk(body);
   } catch (err) {

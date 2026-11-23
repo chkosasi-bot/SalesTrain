@@ -35,16 +35,34 @@ export const TTS_VOICES = [
 ] as const;
 export type TtsVoice = (typeof TTS_VOICES)[number];
 
+/** Fallback sesi lama berbasis `scenarios.voice_id`. */
 export const DEFAULT_TTS_VOICE: TtsVoice = "onyx";
+/** Fallback sesi berbasis pelanggan (`customers.tts_voice`). */
+export const DEFAULT_CUSTOMER_VOICE: TtsVoice = "nova";
+
+export const TTS_SPEED_MIN = 0.75;
+export const TTS_SPEED_MAX = 1.3;
+export const DEFAULT_TTS_SPEED = 1.0;
+
+export function isTtsVoice(v: unknown): v is TtsVoice {
+  return typeof v === "string" && (TTS_VOICES as readonly string[]).includes(v.trim().toLowerCase());
+}
 
 /**
- * Mengubah `scenarios.voice_id` menjadi voice TTS yang valid.
- * Kosong / null / tidak dikenal → fallback ke "onyx".
+ * Mengubah nilai voice dari database menjadi voice TTS yang valid.
+ * Kosong / null / tidak dikenal → `fallback` (default "onyx" untuk sesi lama).
  */
-export function resolveTtsVoice(voiceId: unknown): TtsVoice {
-  if (typeof voiceId !== "string") return DEFAULT_TTS_VOICE;
+export function resolveTtsVoice(voiceId: unknown, fallback: TtsVoice = DEFAULT_TTS_VOICE): TtsVoice {
+  if (typeof voiceId !== "string") return fallback;
   const v = voiceId.trim().toLowerCase();
-  return (TTS_VOICES as readonly string[]).includes(v) ? (v as TtsVoice) : DEFAULT_TTS_VOICE;
+  return (TTS_VOICES as readonly string[]).includes(v) ? (v as TtsVoice) : fallback;
+}
+
+/** `customers.tts_speed` (numeric) → kecepatan valid 0.75–1.30, selain itu 1.0. */
+export function resolveTtsSpeed(speed: unknown): number {
+  const n = typeof speed === "string" ? Number(speed) : typeof speed === "number" ? speed : NaN;
+  if (!Number.isFinite(n) || n < TTS_SPEED_MIN || n > TTS_SPEED_MAX) return DEFAULT_TTS_SPEED;
+  return Math.round(n * 100) / 100;
 }
 
 /** Jumlah maksimum pesan riwayat yang dikirim ke LLM (termasuk ucapan terbaru). */

@@ -252,7 +252,7 @@ export default function QuizPanel({ productId, productName, passingThreshold, st
         </p>
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
           <Link
-            href="/"
+            href={`/?product_id=${productId}`}
             className="inline-flex items-center justify-center gap-2 rounded-2xl bg-brand px-4 py-3 font-semibold text-on-brand transition hover:bg-brand-strong"
           >
             <Mic className="h-5 w-5" aria-hidden /> Mulai Simulasi
@@ -320,7 +320,7 @@ export default function QuizPanel({ productId, productName, passingThreshold, st
       ))}
 
       <Link
-        href="/"
+        href={`/?product_id=${productId}`}
         className="flex w-full items-center justify-center gap-2 rounded-2xl bg-brand px-5 py-4 font-semibold text-on-brand transition hover:bg-brand-strong"
       >
         <Mic className="h-5 w-5" aria-hidden /> Lanjut ke Simulasi Roleplay

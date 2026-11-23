@@ -1,12 +1,12 @@
 "use client";
 
-import { Lightbulb, RotateCcw, Sparkles, ThumbsUp } from "lucide-react";
-import type { Evaluation, ScenarioSummary } from "@/lib/types";
+import { CircleCheck, CircleX, Lightbulb, RotateCcw, Sparkles, ThumbsUp } from "lucide-react";
+import type { Evaluation, SessionContext } from "@/lib/types";
 import type { ReactNode } from "react";
 
 interface Props {
   evaluation: Evaluation;
-  scenario: ScenarioSummary;
+  context: SessionContext;
   salesmanName: string;
   onRestart: () => void;
   userSlot?: ReactNode;
@@ -19,7 +19,7 @@ function grade(score: number) {
   return { label: "Perlu Latihan", tone: "text-danger", ring: "var(--danger)" };
 }
 
-export default function ResultScreen({ evaluation, scenario, salesmanName, onRestart, userSlot }: Props) {
+export default function ResultScreen({ evaluation, context, salesmanName, onRestart, userSlot }: Props) {
   const g = grade(evaluation.score);
   const radius = 52;
   const circumference = 2 * Math.PI * radius;
@@ -33,7 +33,14 @@ export default function ResultScreen({ evaluation, scenario, salesmanName, onRes
           <p className="inline-flex items-center gap-1.5 rounded-full bg-brand-soft px-3 py-1 text-xs font-semibold text-brand-strong">
             <Sparkles className="h-3.5 w-3.5" aria-hidden /> Hasil Evaluasi
           </p>
-          <h1 className="mt-3 text-lg font-bold md:text-xl">{scenario.title}</h1>
+          <h1 className="mt-3 text-lg font-bold md:text-xl">
+            {context.customer ? `${context.customer.owner_name} — ${context.customer.store_name}` : context.title}
+          </h1>
+          {(context.product || context.focus) && (
+            <p className="text-sm text-muted">
+              {[context.product?.name, context.focus?.label].filter(Boolean).join(" · ")}
+            </p>
+          )}
           {salesmanName.trim() && <p className="text-sm text-muted">Salesman: {salesmanName.trim()}</p>}
         </div>
 
@@ -60,6 +67,16 @@ export default function ResultScreen({ evaluation, scenario, salesmanName, onRes
             </div>
           </div>
           <p className={`mt-3 text-base font-semibold ${g.tone}`}>{g.label}</p>
+          <p
+            className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
+              evaluation.passed ? "bg-success-soft text-success" : "bg-warning-soft text-warning"
+            }`}
+          >
+            {evaluation.passed ? <CircleCheck className="h-3.5 w-3.5" aria-hidden /> : <CircleX className="h-3.5 w-3.5" aria-hidden />}
+            {evaluation.passed
+              ? `Lulus profil ${context.customer?.customer_code ?? "ini"} (min. ${evaluation.passing_score})`
+              : `Belum lulus — butuh skor ${evaluation.passing_score}`}
+          </p>
           <p className="mt-2 max-w-prose text-center text-sm leading-relaxed text-muted">{evaluation.summary}</p>
         </section>
 

@@ -10,6 +10,7 @@ import {
   Mic,
   MessageSquareText,
   Play,
+  Package,
   Store,
   Volume2,
 } from "lucide-react";
@@ -26,7 +27,7 @@ import type {
   ChatMessage,
   EvaluateSessionResponse,
   Evaluation,
-  ScenarioSummary,
+  SessionContext,
   SessionInfo,
   VoiceTurnResponse,
 } from "@/lib/types";
@@ -45,7 +46,7 @@ const PHASE_LABEL: Record<Phase, string> = {
 
 interface Props {
   session: SessionInfo;
-  scenario: ScenarioSummary;
+  context: SessionContext;
   onEvaluated: (evaluation: Evaluation) => void;
   onExit: () => void;
 }
@@ -60,7 +61,7 @@ function resetAudioElement(audio: HTMLAudioElement) {
 let messageSeq = 0;
 const nextId = () => `m-${Date.now()}-${messageSeq++}`;
 
-export default function SessionScreen({ session, scenario, onEvaluated, onExit }: Props) {
+export default function SessionScreen({ session, context, onEvaluated, onExit }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [phase, setPhaseState] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -89,7 +90,7 @@ export default function SessionScreen({ session, scenario, onEvaluated, onExit }
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(true);
 
-  const customerName = scenario.customer_name || "Pelanggan";
+  const customerName = context.counterpart_name || "Pelanggan";
 
   const setPhase = useCallback((p: Phase) => {
     phaseRef.current = p;
@@ -478,10 +479,24 @@ export default function SessionScreen({ session, scenario, onEvaluated, onExit }
           <ArrowLeft className="h-5 w-5" />
         </button>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-sm font-semibold md:text-base">{scenario.title}</h1>
+          <h1 className="truncate text-sm font-semibold md:text-base">
+            {context.customer ? `${context.customer.owner_name} · ${context.customer.store_name}` : context.title}
+          </h1>
           <p className="flex items-center gap-1 truncate text-xs text-muted">
-            <Store className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            <span className="truncate">{customerName}</span>
+            {context.product ? (
+              <>
+                <Package className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span className="truncate">
+                  {context.product.name}
+                  {context.focus ? ` · ${context.focus.label}` : ""}
+                </span>
+              </>
+            ) : (
+              <>
+                <Store className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span className="truncate">{customerName}</span>
+              </>
+            )}
           </p>
         </div>
         <button
@@ -512,10 +527,31 @@ export default function SessionScreen({ session, scenario, onEvaluated, onExit }
               Mulai percakapan dengan menyapa <span className="font-medium text-ink">{customerName}</span>.
               Tahan tombol mikrofon di bawah, bicara, lalu lepas.
             </p>
-            {scenario.description && (
-              <p className="mt-4 rounded-xl border border-line bg-surface p-3 text-left text-xs text-muted">
-                {scenario.description}
-              </p>
+            {(context.customer || context.description) && (
+              <div className="mt-4 space-y-1.5 rounded-xl border border-line bg-surface p-3 text-left text-xs text-muted">
+                {context.customer && (
+                  <p>
+                    <span className="font-semibold text-ink">{context.customer.store_name}</span>
+                    {[context.customer.store_scale, context.customer.area_name].filter(Boolean).length > 0 &&
+                      ` — ${[context.customer.store_scale, context.customer.area_name].filter(Boolean).join(", ")}`}
+                    <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase ${context.customer.is_mandatory ? "bg-brand text-on-brand" : "bg-surface-2"}`}>
+                      {context.customer.is_mandatory ? "Wajib" : "Opsional"}
+                    </span>
+                  </p>
+                )}
+                {context.product && (
+                  <p>
+                    Produk: <span className="font-medium text-ink">{context.product.name}</span> ({context.product.product_code})
+                  </p>
+                )}
+                {context.focus && (
+                  <p>
+                    Fokus: <span className="font-medium text-ink">{context.focus.label}</span>
+                    {context.challenge_mode === "tough" ? " · Menantang" : ""}
+                  </p>
+                )}
+                {context.description && <p>{context.description}</p>}
+              </div>
             )}
           </div>
         ) : (

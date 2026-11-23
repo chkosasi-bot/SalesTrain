@@ -10,6 +10,7 @@ import {
   ClipboardList,
   Megaphone,
   MapPin,
+  Mic,
   Package,
   Percent,
   RotateCcw,
@@ -139,8 +140,14 @@ export default function ProductDetail() {
           {p.category && <span className="ml-1.5">· {p.category}</span>}
         </p>
         <h1 className="mt-1.5 text-xl font-bold leading-snug">{p.name}</h1>
-        <div className="mt-2">
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           <StatusPill status={data.status} threshold={data.passing_threshold} />
+          <Link
+            href={`/?product_id=${p.id}`}
+            className="inline-flex items-center gap-1 rounded-full bg-brand px-3 py-1 text-xs font-semibold text-on-brand transition hover:bg-brand-strong"
+          >
+            <Mic className="h-3.5 w-3.5" aria-hidden /> Latih di Simulasi
+          </Link>
         </div>
       </header>
 

@@ -1,18 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import ScenarioPicker from "@/components/ScenarioPicker";
+import SessionConfigurator from "@/components/SessionConfigurator";
 import SessionScreen from "@/components/SessionScreen";
 import ResultScreen from "@/components/ResultScreen";
 import AppTopBar from "@/components/AppTopBar";
 import MasteryStatusBanner from "@/components/MasteryStatusBanner";
 import { useCurrentUser } from "@/lib/use-current-user";
-import type { CreateSessionResponse, Evaluation, ScenarioSummary, SessionInfo } from "@/lib/types";
+import type { CreateSessionResponse, Evaluation, SessionContext, SessionInfo } from "@/lib/types";
 
 type Screen =
   | { name: "select" }
-  | { name: "session"; session: SessionInfo; scenario: ScenarioSummary }
-  | { name: "result"; scenario: ScenarioSummary; evaluation: Evaluation };
+  | { name: "session"; session: SessionInfo; context: SessionContext }
+  | { name: "result"; context: SessionContext; evaluation: Evaluation };
 
 const NAME_KEY = "sales-roleplay:salesman-name";
 
@@ -44,7 +44,7 @@ export default function Home() {
   }, []);
 
   const handleStarted = useCallback((data: CreateSessionResponse) => {
-    setScreen({ name: "session", session: data.session, scenario: data.scenario });
+    setScreen({ name: "session", session: data.session, context: data.context });
   }, []);
 
   const backToSelect = useCallback(() => setScreen({ name: "select" }), []);
@@ -69,11 +69,11 @@ export default function Home() {
         }`}
       >
         {screen.name === "select" && (
-          <ScenarioPicker
+          <SessionConfigurator
             salesmanName={salesmanName}
             onSalesmanNameChange={updateName}
             onStarted={handleStarted}
-            userSlot={selectSlot}
+            headerSlot={selectSlot}
           />
         )}
 
@@ -81,16 +81,16 @@ export default function Home() {
           <SessionScreen
             key={screen.session.id}
             session={screen.session}
-            scenario={screen.scenario}
+            context={screen.context}
             onExit={backToSelect}
-            onEvaluated={(evaluation) => setScreen({ name: "result", scenario: screen.scenario, evaluation })}
+            onEvaluated={(evaluation) => setScreen({ name: "result", context: screen.context, evaluation })}
           />
         )}
 
         {screen.name === "result" && (
           <ResultScreen
             evaluation={screen.evaluation}
-            scenario={screen.scenario}
+            context={screen.context}
             salesmanName={salesmanName}
             onRestart={backToSelect}
             userSlot={userSlot}

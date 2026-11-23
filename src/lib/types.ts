@@ -1,15 +1,7 @@
 // Tipe data bersama antara API routes (server) dan UI (client).
 
-export interface ScenarioSummary {
-  id: string;
-  title: string;
-  description: string | null;
-  customer_name: string | null;
-}
-
 export interface SessionInfo {
   id: string;
-  scenario_id: string;
   salesman_name: string | null;
   status: string;
 }
@@ -27,15 +19,14 @@ export interface Evaluation {
   strengths: string[];
   improvements: string[];
   summary: string;
-}
-
-export interface ScenariosResponse {
-  scenarios: ScenarioSummary[];
+  /** Lulus bila skor ≥ passing_score (mengisi sessions.passed). */
+  passed: boolean;
+  passing_score: number;
 }
 
 export interface CreateSessionResponse {
   session: SessionInfo;
-  scenario: ScenarioSummary;
+  context: SessionContext;
 }
 
 export interface VoiceTurnResponse {
@@ -43,8 +34,10 @@ export interface VoiceTurnResponse {
   assistantReply: string;
   audioBase64: string | null;
   audioMimeType: string;
-  /** Voice TTS yang benar-benar dipakai (hasil dari scenarios.voice_id atau fallback "onyx"). */
+  /** Voice TTS yang benar-benar dipakai (customers.tts_voice / scenarios.voice_id, atau fallback). */
   voice: string;
+  /** Kecepatan TTS yang dipakai (customers.tts_speed, rentang 0.75–1.30, fallback 1.0). */
+  speed: number;
 }
 
 export interface EvaluateSessionResponse {
@@ -199,6 +192,75 @@ export interface SubmitQuizResponse {
   weak_topics: QuizTopic[];
   review: QuizReviewItem[];
   status: MasteryStatus;
+}
+
+// ---------- Simulasi berbasis pelanggan & produk ----------
+
+export type ScenarioFocus = "initial_offer" | "price_negotiation" | "bonus_terms" | "competitor_h2h";
+export type ChallengeMode = "standard" | "tough";
+
+export interface CustomerPassStatus {
+  attempts: number;
+  best_score: number | null;
+  passed: boolean;
+  last_completed_at: string | null;
+}
+
+export interface SimulationCustomer {
+  id: string;
+  customer_code: string;
+  owner_name: string;
+  store_name: string;
+  store_scale: string | null;
+  area_name: string | null;
+  individual_assessment: string;
+  payment_performance: string | null;
+  historical_transactions: string | null;
+  is_mandatory: boolean;
+  tts_voice: string;
+  tts_speed: number;
+  status: CustomerPassStatus;
+  locked: boolean;
+  required_customers: { id: string; customer_code: string; owner_name: string }[];
+}
+
+export interface SimulationProduct {
+  id: string;
+  product_code: string;
+  name: string;
+  brand: string | null;
+  category: string | null;
+  competitor_count: number;
+}
+
+export interface SimulationOptionsResponse {
+  products: SimulationProduct[];
+  customers: SimulationCustomer[];
+  focuses: { id: ScenarioFocus; label: string; short: string; description: string }[];
+  challenge_modes: { id: ChallengeMode; label: string }[];
+  passing_score: number;
+}
+
+/** Konteks sesi yang ditampilkan di header sesi & layar hasil. */
+export interface SessionContext {
+  title: string;
+  product: { id: string; product_code: string; name: string; brand: string | null } | null;
+  customer: {
+    id: string;
+    customer_code: string;
+    owner_name: string;
+    store_name: string;
+    store_scale: string | null;
+    area_name: string | null;
+    is_mandatory: boolean;
+    tts_voice: string;
+    tts_speed: number;
+  } | null;
+  focus: { id: ScenarioFocus; label: string } | null;
+  challenge_mode: ChallengeMode | null;
+  description: string | null;
+  /** Nama lawan bicara AI (pemilik toko). */
+  counterpart_name: string;
 }
 
 export interface ApiError {

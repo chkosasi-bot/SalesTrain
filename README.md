@@ -99,6 +99,25 @@ src/components/MasteryStatusBanner   Indikator kelulusan di halaman simulasi (ti
   `details_json` (`module: "product_mastery"`, `quiz_id`, soal, jawaban, pembahasan).
 - Status lulus per produk = pernah lulus minimal sekali; Product Mastery lulus bila semua produk aktif lulus.
 
+## Simulasi berbasis Pelanggan & Produk (`/`)
+
+```
+supabase/migrations/20261124_sessions_product_customer.sql  sessions + own_product_id, customer_id, scenario_focus, challenge_mode
+src/components/SessionConfigurator.tsx  Konfigurator: Produk (pre-select ?product_id=) → Pelanggan (Wajib/Opsional + briefing) → Fokus → Tantangan
+src/app/api/simulation/options          GET  — produk aktif, pelanggan aktif (+ status lulus & kunci), daftar fokus
+src/app/api/sessions                    POST — validasi produk/pelanggan/fokus + aturan kunci di server, simpan relasi ke sessions
+src/lib/simulation.ts                   Fokus skenario, getCustomerPassStatus(), buildCustomerCards(), checkCustomerUnlocked()
+src/lib/persona.ts                      System prompt persona dinamis (customers + own_products + competitor_products)
+```
+
+- **Lulus per pelanggan** = sesi milik user untuk `customer_id` tsb dengan `status = 'completed'` dan `passed = true`
+  (`/api/evaluate-session` mengisi `passed` bila skor ≥ 80). Satu sesi hanya bisa dinilai sekali.
+- **Aturan kunci:** profil `is_mandatory = false` terkunci sampai semua profil `is_mandatory = true` aktif lulus — dicek di UI dan
+  di `POST /api/sessions` (403).
+- **Suara:** `customers.tts_voice` (fallback `nova`) & `customers.tts_speed` (rentang 0.75–1.30, fallback 1.0) → OpenAI TTS `voice` & `speed`.
+- Persona memakan data rahasia (margin, bonus, counter strategy) hanya untuk menilai argumen salesman; AI diinstruksikan tidak membocorkannya.
+- Sesi lama berbasis tabel `scenarios` tetap bisa dilanjutkan & dinilai (jalur kompatibilitas di voice-turn/evaluate).
+
 ## Alur `/api/voice-turn`
 
 1. STT (`gpt-4o-mini-transcribe`, fallback `whisper-1`, bahasa `id`) **paralel** dengan pengambilan sesi, skenario & 11 pesan terakhir.
